@@ -1,14 +1,19 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"os"
 )
 
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 type Tutor struct {
-	config Config
-	client Client
+	config   Config
+	client   Client
+	messages []ChatMessage
 }
 
 func NewTutor(config Config) (Tutor, error) {
@@ -20,16 +25,19 @@ func NewTutor(config Config) (Tutor, error) {
 		baseURL: "https://openrouter.ai/api/v1/chat/completions",
 		apiKey:  key,
 	}
-	return Tutor{config: config, client: &client}, nil
+	return Tutor{config: config, client: client}, nil
 }
 
-func (t Tutor) callModel(prompt string) string {
-	return "todo"
-	/*
+func (t *Tutor) callModel(prompt string) (string, error) {
+	newMessage := ChatMessage{Role: "user", Content: prompt}
+	t.messages = append(t.messages, newMessage)
+
+	msg, err := t.client.sendRequest(t.messages, t.config.Model)
 	if err != nil {
-		panic(err.Error())
+		return "", err
 	}
-	//fmt.Printf("%+v\n", message.Content)
-	return message.Content[0].AsText().Text
-	*/
+
+	t.messages = append(t.messages, msg)
+	return msg.Content, nil
+
 }

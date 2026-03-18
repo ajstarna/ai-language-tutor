@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	//"fmt"
 	"io"
 	"net/http"
 )
@@ -18,44 +18,45 @@ type ChatRequest struct {
 	Messages []ChatMessage `json:"messages"`
 }
 
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type ChatResponse struct {
+	Choices []Choice `json:"choices"`
 }
 
-func (c Client) send(chatRequest ChatRequest) (string, error) {
+type Choice struct {
+	Message ChatMessage `json:"message"`
+}
+
+func (c Client) sendRequest(messages []ChatMessage, model string) (ChatMessage, error) {
+	chatRequest := ChatRequest{Model: model, Messages: messages}
 	jsonData, err := json.Marshal(chatRequest) // Encode Go struct to JSON bytes
 	if err != nil {
 		// Handle error
-		return "", err
+		return ChatMessage{}, err
 	}
 	// Create a POST request with the JSON data as an io.Reader
 	req, err := http.NewRequest(http.MethodPost, c.baseURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		// Handle error
-		return "", err
+		return ChatMessage{}, err
 	}
 
 	// Set necessary headers
-	req.Header.Set("Content-Type", "application/json")     // Inform the server the body is JSON
-	req.Header.Set("Authorization", "Bearer your_api_key") // Add an authorization token
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-
-	httpClient := &http.DefaultClient{}
-	res, err := httpClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return ChatMessage{}, err
 	}
 	defer res.Body.Close()
 
 	// Read and process the response body as needed
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
-		return "", err
+		return ChatMessage{}, err
 	}
 
-	fmt.Printf("client: status code: %d\n", res.StatusCode)
-	fmt.Printf("client: response body: %s\n", resBody)
-
-	return resBody, nil
+	var response ChatResponse
+	json.Unmarshal(resBody, &response)
+	return response.Choices[0].Message, nil
 }

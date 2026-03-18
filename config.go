@@ -25,6 +25,7 @@ type Config struct {
 	TutorLanguage  TutorLanguage
 	Mode           Mode
 	Strictness     int // e.g. 1-3
+	Model          string
 }
 
 func loadConfig() Config {
@@ -34,5 +35,6 @@ func loadConfig() Config {
 		TutorLanguage:  TutorLanguageSource,
 		Mode:           ModeConversational,
 		Strictness:     1,
+		Model:          "google/gemini-2.0-flash-001",
 	}
 }

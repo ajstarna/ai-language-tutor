@@ -25,7 +25,7 @@ func main() {
 		if line == "quit" {
 			break
 		}
-		modelOutput := tutor.callModel(line)
+		modelOutput, _ := tutor.callModel(line)
 		fmt.Println(modelOutput)
 		fmt.Print("> ")
 	}
