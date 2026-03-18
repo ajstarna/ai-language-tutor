@@ -32,7 +32,7 @@ func loadConfig() Config {
 	return Config{
 		SourceLanguage: "English",
 		TargetLanguage: "German",
-		TutorLanguage:  TutorLanguageSource,
+		TutorLanguage:  TutorLanguageTarget,
 		Mode:           ModeConversational,
 		Strictness:     1,
 		Model:          "google/gemini-2.0-flash-001",
