@@ -57,6 +57,14 @@ func (c Client) sendRequest(messages []ChatMessage, model string) (ChatMessage, 
 	}
 
 	var response ChatResponse
-	json.Unmarshal(resBody, &response)
+
+	if err := json.Unmarshal(resBody, &response); err != nil {
+		return ChatMessage{}, err
+	}
+
+	if len(response.Choices) == 0 {
+		return ChatMessage{}, errors.New("empty response from API")
+	}
+
 	return response.Choices[0].Message, nil
 }

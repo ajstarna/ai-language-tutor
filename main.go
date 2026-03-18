@@ -25,7 +25,12 @@ func main() {
 		if line == "quit" {
 			break
 		}
-		modelOutput, _ := tutor.callModel(line)
+		modelOutput, err := tutor.callModel(line)
+		if err != nil {
+			fmt.Println("error:", err)
+			fmt.Print("> ")
+			continue
+		}
 		fmt.Println(modelOutput)
 		fmt.Print("> ")
 	}
