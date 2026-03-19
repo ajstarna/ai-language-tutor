@@ -21,7 +21,7 @@ func buildSystemPrompt(config Config) string {
 		languageInstruction = fmt.Sprintf("Respond in %s (the language they are learning).", config.TargetLanguage)
 	case TutorLanguageMixed:
 		languageInstruction = fmt.Sprintf("Mix %s and %s in your responses.", config.TargetLanguage, config.SourceLanguage)
-  }
+	}
 
 	prompt := fmt.Sprintf(`You are a language tutor.
   The student speaks %s and is learning %s.

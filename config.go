@@ -1,5 +1,15 @@
 package main
 
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+)
+
 type Mode string
 
 // The mode tells the agent how to behave:
@@ -29,12 +39,64 @@ type Config struct {
 }
 
 func loadConfig() Config {
-	return Config{
-		SourceLanguage: "English",
-		TargetLanguage: "German",
-		TutorLanguage:  TutorLanguageTarget,
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	configPath := filepath.Join(homeDir, ".goodfriendstutor", "config.json")
+
+	var config Config
+
+	fileBytes, err := os.ReadFile(configPath)
+
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return promptConfig(configPath)
+		}
+		log.Fatalf("failed to read config file %s: %v", configPath, err)
+	}
+
+	err = json.Unmarshal(fileBytes, &config)
+	if err != nil {
+		log.Fatalf("failed to parse config file %s: %v", configPath, err)
+	}
+
+	return config
+}
+
+// TODO: improve all this
+func promptConfig(configPath string) Config {
+	scanner := bufio.NewReader(os.Stdin)
+
+	fmt.Println("What language do you currently speak")
+	source := scanner.Scan()
+
+	fmt.Println("What language do you want to learn?")
+	target := scanner.Scan()
+
+	fmt.Println("What language should your tutor speak: ('source', 'target', 'mixed'):")
+	tutorLang := scanner.Scan()
+
+	config :=  Config{
+		SourceLanguage: source,
+		TargetLanguage: target,
+		TutorLanguage:  tutorLang,
 		Mode:           ModeConversational,
 		Strictness:     1,
 		Model:          "google/gemini-2.0-flash-001",
 	}
+
+	// save for next time
+	jsonData, err := json.Marshall(config)
+	if err != nil {
+		// should not happen
+		log.Fatal(err)
+	}
+
+	err = os.WriteFile(configPath, jsonData, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return config
+
 }
