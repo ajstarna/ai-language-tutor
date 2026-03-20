@@ -16,6 +16,7 @@ type Client struct {
 type ChatRequest struct {
 	Model    string        `json:"model"`
 	Messages []ChatMessage `json:"messages"`
+	Tools    []Tool        `json:"tools,omitempty"`
 }
 
 type ChatResponse struct {
@@ -26,9 +27,12 @@ type Choice struct {
 	Message ChatMessage `json:"message"`
 }
 
-func (c Client) sendRequest(messages []ChatMessage, model string) (ChatMessage, error) {
-	chatRequest := ChatRequest{Model: model, Messages: messages}
+func (c Client) sendRequest(model string, messages []ChatMessage, tools []Tool) (ChatMessage, error) {
+	chatRequest := ChatRequest{Model: model, Messages: messages, Tools: tools}
 	jsonData, err := json.Marshal(chatRequest) // Encode Go struct to JSON bytes
+
+	//fmt.Printf("request body: %s\n", jsonData)
+
 	if err != nil {
 		// Handle error
 		return ChatMessage{}, err

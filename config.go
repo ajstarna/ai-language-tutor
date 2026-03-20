@@ -16,9 +16,8 @@ type Mode string
 // Guided acts more like an instructor, conversational just chats, mixed with chat but once in a while quiz or something
 
 const (
-	ModeGuided         Mode = "guided"
 	ModeConversational Mode = "conversational"
-	ModeMixed          Mode = "mixed"
+	ModeCurriculum     Mode = "curriculum"
 )
 
 type TutorLanguage string
@@ -89,7 +88,7 @@ func promptConfig(configPath string) Config {
 
 	var mode Mode
 	for {
-		fmt.Println("What mode: ('guided', 'conversational', 'mixed'):")
+		fmt.Println("What mode: ('conversational', 'curriculum'):")
 		scanner.Scan()
 		mode, err = parseMode(scanner.Text())
 		if err == nil {
@@ -128,7 +127,7 @@ func promptConfig(configPath string) Config {
 
 func parseMode(s string) (Mode, error) {
 	switch Mode(s) {
-	case ModeGuided, ModeConversational, ModeMixed:
+	case ModeConversational, ModeCurriculum:
 		return Mode(s), nil
 	default:
 		return "", fmt.Errorf("invalid mode %q", s)

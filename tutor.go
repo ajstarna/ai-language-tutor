@@ -7,8 +7,10 @@ import (
 )
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 func buildSystemPrompt(config Config) string {
@@ -27,7 +29,11 @@ func buildSystemPrompt(config Config) string {
   The student speaks %s and is learning %s.
   %s
   Mode, i.e. whether you guide them in lessons, just converse with them, or a mix of conversation that breaks into mini lessons: %s
-  Strictness (1-3), i.e. how often you will correct their written mistakes: %d`, config.SourceLanguage,
+  Strictness (1-3), i.e. how often you will correct their written mistakes: %d
+
+  When the student makes a grammar or vocabulary mistake with a specific word, you MUST call the store_problem_word tool with the CORRECT form of the word (not the student's incorrect version) and the sentence they used it in. Then correct them naturally in your reply.
+  When the student asks to be quizzed or you decide it is a good time to quiz them, call the get_due_words tool to retrieve words due for review, then quiz them one at a time.
+  After each quiz question is answered, call record_quiz_result with whether they passed or failed.`, config.SourceLanguage,
 		config.TargetLanguage, languageInstruction, config.Mode, config.Strictness)
 	return prompt
 }
@@ -36,6 +42,7 @@ type Tutor struct {
 	config   Config
 	client   Client
 	messages []ChatMessage
+	tools    []Tool
 }
 
 func NewTutor(config Config) (Tutor, error) {
@@ -51,19 +58,40 @@ func NewTutor(config Config) (Tutor, error) {
 	systemPrompt := buildSystemPrompt(config)
 	fmt.Println(systemPrompt)
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
-	return Tutor{config: config, client: client, messages: messages}, nil
+
+	return Tutor{config: config, client: client, messages: messages, tools: allTools}, nil
 }
 
 func (t *Tutor) callModel(prompt string) (string, error) {
 	newMessage := ChatMessage{Role: "user", Content: prompt}
 	t.messages = append(t.messages, newMessage)
 
-	msg, err := t.client.sendRequest(t.messages, t.config.Model)
-	if err != nil {
-		return "", err
+	for {
+		msg, err := t.client.sendRequest(t.config.Model, t.messages, t.tools)
+		fmt.Printf("msg: %+v\n", msg)
+		if err != nil {
+			return "", err
+		}
+		t.messages = append(t.messages, msg)
+
+		if len(msg.ToolCalls) == 0 {
+			return msg.Content, nil
+		}
+
+		// execute each tool call and append results
+		for _, tc := range msg.ToolCalls {
+			result := t.executeTool(tc)
+			t.messages = append(t.messages, ChatMessage{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+			})
+		}
+		// loop back and call model again with tool results
 	}
+}
 
-	t.messages = append(t.messages, msg)
-	return msg.Content, nil
-
+func (t *Tutor) executeTool(toolCall ToolCall) string {
+	fmt.Printf("Inside executeTool: %+v\n", toolCall)
+	return "Tool called successfully"
 }
