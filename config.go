@@ -66,37 +66,80 @@ func loadConfig() Config {
 
 // TODO: improve all this
 func promptConfig(configPath string) Config {
-	scanner := bufio.NewReader(os.Stdin)
+	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Println("What language do you currently speak")
-	source := scanner.Scan()
+	scanner.Scan()
+	source := scanner.Text()
 
 	fmt.Println("What language do you want to learn?")
-	target := scanner.Scan()
+	scanner.Scan()
+	target := scanner.Text()
 
-	fmt.Println("What language should your tutor speak: ('source', 'target', 'mixed'):")
-	tutorLang := scanner.Scan()
+	var tutorLang TutorLanguage
+	var err error
+	for {
+		fmt.Println("What language should your tutor speak: ('source', 'target', 'mixed'):")
+		scanner.Scan()
+		tutorLang, err = parseTutorLanguage(scanner.Text())
+		if err == nil {
+			break
+		}
+	}
 
-	config :=  Config{
+	var mode Mode
+	for {
+		fmt.Println("What mode: ('guided', 'conversational', 'mixed'):")
+		scanner.Scan()
+		mode, err = parseMode(scanner.Text())
+		if err == nil {
+			break
+		}
+	}
+
+	config := Config{
 		SourceLanguage: source,
 		TargetLanguage: target,
 		TutorLanguage:  tutorLang,
-		Mode:           ModeConversational,
+		Mode:           mode,
 		Strictness:     1,
 		Model:          "google/gemini-2.0-flash-001",
 	}
 
 	// save for next time
-	jsonData, err := json.Marshall(config)
+	jsonData, err := json.Marshal(config)
 	if err != nil {
 		// should not happen
 		log.Fatal(err)
 	}
 
-	err = os.WriteFile(configPath, jsonData, 0644)
+	err = os.MkdirAll(filepath.Dir(configPath), 0755)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = os.WriteFile(configPath, jsonData, 0600)
 	if err != nil {
 		log.Fatal(err)
 	}
 	return config
 
+}
+
+func parseMode(s string) (Mode, error) {
+	switch Mode(s) {
+	case ModeGuided, ModeConversational, ModeMixed:
+		return Mode(s), nil
+	default:
+		return "", fmt.Errorf("invalid mode %q", s)
+	}
+}
+
+func parseTutorLanguage(s string) (TutorLanguage, error) {
+	switch TutorLanguage(s) {
+	case TutorLanguageSource, TutorLanguageTarget, TutorLanguageMixed:
+		return TutorLanguage(s), nil
+	default:
+		return "", fmt.Errorf("invalid tutor language %q", s)
+	}
 }
