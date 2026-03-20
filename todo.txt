@@ -1,0 +1,3 @@
+- tool calls for storing problem words and reviewing problem words. Or should the main loop just check when words are due for a quiz?
+- small db for storing problem words (sqlite?)
+- make the output prettier. difference between agent and user text should be clearer.
