@@ -66,6 +66,11 @@ func (t *Tutor) callModel(prompt string) (string, error) {
 	newMessage := ChatMessage{Role: "user", Content: prompt}
 	t.messages = append(t.messages, newMessage)
 
+	// The model can return content and tool calls in the same message — it has already
+	// composed a reply but also wants to trigger a side effect (e.g. storing a mistake).
+	// We save that content as a fallback in case the follow-up response after tool
+	// execution comes back empty.
+	var fallbackContent string
 	for {
 		msg, err := t.client.sendRequest(t.config.Model, t.messages, t.tools)
 		fmt.Printf("msg: %+v\n", msg)
@@ -75,7 +80,15 @@ func (t *Tutor) callModel(prompt string) (string, error) {
 		t.messages = append(t.messages, msg)
 
 		if len(msg.ToolCalls) == 0 {
+			if msg.Content == "" && fallbackContent != "" {
+				return fallbackContent, nil
+			}
 			return msg.Content, nil
+		}
+
+		// update fallback whenever the model includes content alongside tool calls
+		if msg.Content != "" {
+			fallbackContent = msg.Content
 		}
 
 		// execute each tool call and append results
