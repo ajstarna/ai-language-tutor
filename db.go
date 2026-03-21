@@ -43,7 +43,7 @@ func openDB() *sql.DB {
 
 func storeTerm(db *sql.DB, term, problemSentence string) error {
 	now := time.Now()
-	nextReview := now.Add(24 * time.Hour)
+	nextReview := now  // immediately available for review
 
 	// upsert: if term already exists, append the new sentence and reset next_review_date
 	_, err := db.Exec(`
