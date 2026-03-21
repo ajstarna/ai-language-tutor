@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -43,6 +45,7 @@ type Tutor struct {
 	client   Client
 	messages []ChatMessage
 	tools    []Tool
+	db   *sql.DB
 }
 
 func NewTutor(config Config) (Tutor, error) {
@@ -59,7 +62,9 @@ func NewTutor(config Config) (Tutor, error) {
 	fmt.Println(systemPrompt)
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
 
-	return Tutor{config: config, client: client, messages: messages, tools: allTools}, nil
+	db := openDB()
+
+	return Tutor{config: config, client: client, messages: messages, tools: allTools, db: db}, nil
 }
 
 func (t *Tutor) callModel(prompt string) (string, error) {
@@ -106,5 +111,36 @@ func (t *Tutor) callModel(prompt string) (string, error) {
 
 func (t *Tutor) executeTool(toolCall ToolCall) string {
 	fmt.Printf("Inside executeTool: %+v\n", toolCall)
-	return "Tool called successfully"
+	switch toolCall.Function.Name {
+	case "store_problem_word":
+		var args StoreProblemWordArgs
+		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+			return "error parsing arguments"
+		}
+		if err := storeTerm(t.db, args.Term, args.ProblemSentence); err != nil {
+			return "error storing term"
+		}
+		return "stored successfully"
+	case "get_due_words":
+		terms, err := getDueTerms(t.db)
+		if err != nil {
+			return "error fetching due terms"
+		}
+		if len(terms) == 0 {
+			return "no terms due for review"
+		}
+		result, _ := json.Marshal(terms)
+		return string(result)
+	case "record_quiz_result":
+		var args RecordQuizResultArgs
+		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+			return "error parsing arguments"
+		}
+		if err := recordResult(t.db, args.Term, args.Passed); err != nil {
+			return "error recording result"
+		}
+		return "recorded successfully"
+	default:
+		return "unknown tool"
+	}
 }

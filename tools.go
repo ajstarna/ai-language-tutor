@@ -11,6 +11,16 @@ type ToolCall struct {
 	Function ToolCallFunction `json:"function"`
 }
 
+type StoreProblemWordArgs struct {
+	Term            string `json:"term"`
+	ProblemSentence string `json:"problem_sentence"`
+}
+
+type RecordQuizResultArgs struct {
+	Term   string `json:"term"`
+	Passed bool   `json:"passed"`
+}
+
 type Property struct {
 	Type        string `json:"type"`
 	Description string `json:"description"`
@@ -55,16 +65,16 @@ var recordQuizResult = Tool{
 		Parameters: Parameters{
 			Type: "object",
 			Properties: map[string]Property{
-				"word": {
+				"term": {
 					Type:        "string",
-					Description: "the word that was quizzed",
+					Description: "the term that was quizzed",
 				},
 				"passed": {
 					Type:        "boolean",
 					Description: "whether the user answered correctly",
 				},
 			},
-			Required: []string{"word", "passed"},
+			Required: []string{"term", "passed"},
 		},
 	},
 }
@@ -73,20 +83,20 @@ var storeProblemWord = Tool{
 	Type: "function",
 	Function: ToolFunction{
 		Name:        "store_problem_word",
-		Description: "Call this when the student makes a grammar or vocabulary mistake focused on a specific word. This stores it in the DB for later quizzing",
+		Description: "Call this when the student makes a grammar or vocabulary mistake focused on a specific term. This stores it in the DB for later quizzing",
 		Parameters: Parameters{
 			Type: "object",
 			Properties: map[string]Property{
-				"word": Property{
+				"term": Property{
 					Type:        "string",
-					Description: "the word the user used incorrectly",
+					Description: "the correct form of the term the user used incorrectly",
 				},
 				"problem_sentence": Property{
 					Type:        "string",
 					Description: "the sentence in which the user made the mistake",
 				},
 			},
-			Required: []string{"word", "problem_sentence"},
+			Required: []string{"term", "problem_sentence"},
 		},
 	},
 }
