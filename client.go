@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"fmt"
 	"net/http"
 )
 
@@ -59,6 +60,8 @@ func (c Client) sendRequest(model string, messages []ChatMessage, tools []Tool) 
 	if err != nil {
 		return ChatMessage{}, err
 	}
+
+	fmt.Println(string(resBody))
 
 	var response ChatResponse
 

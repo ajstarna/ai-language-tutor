@@ -5,7 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"github.com/charmbracelet/lipgloss"
 )
+
+var tutorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("183"))
+var promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
+var toolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Italic(true)
 
 func main() {
 
@@ -17,7 +23,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Print("> ")
+	fmt.Print(promptStyle.Render("> "))
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for scanner.Scan() {
@@ -28,11 +34,11 @@ func main() {
 		modelOutput, err := tutor.callModel(line)
 		if err != nil {
 			fmt.Println("error:", err)
-			fmt.Print("> ")
+			fmt.Print(promptStyle.Render("> "))
 			continue
 		}
-		fmt.Println(modelOutput)
-		fmt.Print("> ")
+		fmt.Println(tutorStyle.Render(modelOutput))
+		fmt.Print(promptStyle.Render("> "))
 	}
 
 }

@@ -1,3 +1,4 @@
-- make the output prettier. difference between agent and user text should be clearer.
-- let the user ask for a quiz?
+- let me use the arrow keys on my prompt
 - differences between curriculum mode and conversational mode more clear (frequency lists? lessons?)
+- the quiz could be more interesting. Fill in blanks and stuff
+- curriculum mode should have topics for language learning kinda in order. The model should indicate what levels/skills the user knows.

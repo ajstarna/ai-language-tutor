@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type ChatMessage struct {
@@ -33,9 +34,11 @@ func buildSystemPrompt(config Config) string {
   Mode, i.e. whether you guide them in lessons, just converse with them, or a mix of conversation that breaks into mini lessons: %s
   Strictness (1-3), i.e. how often you will correct their written mistakes: %d
 
-  When the student makes a grammar or vocabulary mistake with a specific word, you MUST call the store_problem_word tool with the CORRECT form of the word (not the student's incorrect version) and the sentence they used it in. Then correct them naturally in your reply.
-  When the student asks to be quizzed or you decide it is a good time to quiz them, call the get_due_words tool to retrieve words due for review, then quiz them one at a time.
-  After each quiz question is answered, call record_quiz_result with whether they passed or failed.`, config.SourceLanguage,
+  When the student makes a grammar or vocabulary mistake with a specific word, you MUST call the store_problem_word tool with the CORRECT form of the word (not the student's incorrect version) and the sentence they used it in. Then correct them naturally in your reply. Do NOT store simple typos (e.g. "biin" instead of "bin") — only store genuine vocabulary or grammar mistakes worth reviewing later.
+  When the student asks to be quizzed or you decide it is a good time to quiz them, call the get_due_words tool to retrieve words due for review, then quiz them one word at a time using this exact two-step format:
+    Step 1: Ask "What does [term] mean?" and wait for their answer.
+    Step 2: Ask them to use the term correctly in a sentence and wait for their answer.
+  Only after both steps are complete, call record_quiz_result — pass=true only if they answered both steps correctly. Then move on to the next word.`, config.SourceLanguage,
 		config.TargetLanguage, languageInstruction, config.Mode, config.Strictness)
 	return prompt
 }
@@ -77,11 +80,25 @@ func (t *Tutor) callModel(prompt string) (string, error) {
 	// execution comes back empty.
 	var fallbackContent string
 	for {
-		msg, err := t.client.sendRequest(t.config.Model, t.messages, t.tools)
-		fmt.Printf("msg: %+v\n", msg)
-		if err != nil {
-			return "", err
+		retries := 0  // we retry if the model returns an empty looking results
+		var msg ChatMessage
+		var err error
+		for {
+			msg, err = t.client.sendRequest(t.config.Model, t.messages, t.tools)
+			//fmt.Printf("msg: %+v\n", msg)
+			if err != nil {
+				return "", err
+			}
+			if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) == "" {
+				retries++
+				if retries >= 3 {
+					return "", errors.New("model returned empty response")
+				}
+				continue  // retry without appending bad message to history
+			}
+			break // good message
 		}
+
 		t.messages = append(t.messages, msg)
 
 		if len(msg.ToolCalls) == 0 {
@@ -110,18 +127,19 @@ func (t *Tutor) callModel(prompt string) (string, error) {
 }
 
 func (t *Tutor) executeTool(toolCall ToolCall) string {
-	fmt.Printf("Inside executeTool: %+v\n", toolCall)
 	switch toolCall.Function.Name {
 	case "store_problem_word":
 		var args StoreProblemWordArgs
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 			return "error parsing arguments"
 		}
+		fmt.Println(toolStyle.Render("⟳ Saving problem term: \"" + args.Term + "\""))
 		if err := storeTerm(t.db, args.Term, args.ProblemSentence); err != nil {
 			return "error storing term"
 		}
 		return "stored successfully"
 	case "get_due_words":
+		fmt.Println(toolStyle.Render("⟳ Fetching due words..."))
 		terms, err := getDueTerms(t.db)
 		if err != nil {
 			return "error fetching due terms"
@@ -136,6 +154,11 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 			return "error parsing arguments"
 		}
+		passed := "✗"
+		if args.Passed {
+			passed = "✓"
+		}
+		fmt.Println(toolStyle.Render("⟳ Recording quiz result for: \"" + args.Term + "\" " + passed))
 		if err := recordResult(t.db, args.Term, args.Passed); err != nil {
 			return "error recording result"
 		}
