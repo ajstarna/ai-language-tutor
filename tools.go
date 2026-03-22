@@ -109,7 +109,7 @@ var storeUserFact = Tool{
 	Type: "function",
 	Function: ToolFunction{
 		Name:        "store_user_fact",
-		Description: "Store a personal fact about the student that is worth remembering for future conversations, such as their name, job, hobbies, family, or interests.",
+		Description: "Store a personal fact about the student for future conversations, such as their name, job, hobbies, family, or interests. Do NOT use this for language mistakes — those go to store_problem_word.",
 		Parameters: Parameters{
 			Type: "object",
 			Properties: map[string]Property{
@@ -123,4 +123,5 @@ var storeUserFact = Tool{
 	},
 }
 
-var allTools = []Tool{getDueWords, recordQuizResult, storeProblemWord, storeUserFact}
+var allTools  = []Tool{getDueWords, recordQuizResult, storeProblemWord, storeUserFact}
+var quizTools = []Tool{getDueWords, recordQuizResult, storeUserFact}

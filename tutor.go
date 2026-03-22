@@ -2,12 +2,18 @@ package main
 
 import (
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
+	"text/template"
 )
+
+//go:embed prompts/*.tmpl
+var promptFiles embed.FS
 
 type ChatMessage struct {
 	Role       string     `json:"role"`
@@ -16,10 +22,18 @@ type ChatMessage struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-func buildSystemPrompt(config Config, userFacts []string) string {
+type promptData struct {
+	SourceLanguage      string
+	TargetLanguage      string
+	LanguageInstruction string
+	LanguageWarning     string
+	Mode                Mode
+	Strictness          int
+	UserFacts           []string
+}
 
-	var languageInstruction string
-	var languageWarning string
+func buildSystemPrompt(config Config, userFacts []string) string {
+	var languageInstruction, languageWarning string
 	switch config.TutorLanguage {
 	case TutorLanguageSource:
 		languageInstruction = fmt.Sprintf("Respond in %s (the student's native language).", config.SourceLanguage)
@@ -32,34 +46,32 @@ func buildSystemPrompt(config Config, userFacts []string) string {
 		languageWarning = fmt.Sprintf("IMPORTANT: Use your judgement on the mix — lean on %s for clarity but introduce %s vocabulary and short phrases naturally as the conversation flows.", config.SourceLanguage, config.TargetLanguage)
 	}
 
-	var factsSection string
-	if len(userFacts) > 0 {
-		factsSection = "What you know about the student:\n"
-		for _, f := range userFacts {
-			factsSection += "  - " + f + "\n"
-		}
+	data := promptData{
+		SourceLanguage:      config.SourceLanguage,
+		TargetLanguage:      config.TargetLanguage,
+		LanguageInstruction: languageInstruction,
+		LanguageWarning:     languageWarning,
+		Mode:                config.Mode,
+		Strictness:          config.Strictness,
+		UserFacts:           userFacts,
 	}
 
-	prompt := fmt.Sprintf(`You are a language tutor.
-  The student speaks %s and is learning %s.
-  %s
-  %s
-  %s
-  Mode, i.e. whether you guide them in lessons, just converse with them, or a mix of conversation that breaks into mini lessons: %s
-  Strictness level: %d. When the student makes a mistake, whether to correct it and store it depends on the strictness level:
-    Level 1 — only correct and store serious mistakes that impede understanding. Ignore minor errors.
-    Level 2 — correct and store most grammatical and vocabulary mistakes, but use judgement on minor ones.
-    Level 3 — correct and store every mistake, no matter how small.
-  When you do correct a mistake, call store_problem_word with the CORRECT form of the word (not the student's incorrect version) and the sentence they used it in. Then in your reply briefly explain what was wrong, what the correct form is, and why — keep it concise but informative. Never store simple typos (e.g. "biin" instead of "bin") regardless of strictness level.
-  When the student asks to be quizzed or you decide it is a good time to quiz them, call the get_due_words tool to retrieve words due for review, then quiz them one word at a time using this exact two-step format:
-    Step 1: Ask "What does [term] mean?" and wait for their answer.
-    Step 2: Ask them to use the term correctly in a sentence and wait for their answer.
-  Only after both steps are complete, call record_quiz_result — pass=true only if they answered both steps correctly. Then move on to the next word.
-  IMPORTANT: During a quiz, do NOT call store_problem_word — even if the student makes a mistake. Only call record_quiz_result to record the outcome.
-  After every tool call you MUST always follow up with a response to the student — never leave the conversation silent after a tool call.
-  When the student mentions something personal about themselves (name, job, hobbies, family, etc.) that is worth remembering, call store_user_fact with a concise summary of the fact.`, config.SourceLanguage,
-		config.TargetLanguage, languageInstruction, languageWarning, factsSection, config.Mode, config.Strictness)
-	return prompt
+	files := []string{
+		"prompts/base.tmpl",
+		"prompts/corrections.tmpl",
+		"prompts/quiz.tmpl",
+		"prompts/tools.tmpl",
+	}
+
+	var buf strings.Builder
+	for _, f := range files {
+		tmpl := template.Must(template.ParseFS(promptFiles, f))
+		if err := tmpl.Execute(&buf, data); err != nil {
+			log.Fatalf("failed to render prompt template %s: %v", f, err)
+		}
+		buf.WriteString("\n")
+	}
+	return buf.String()
 }
 
 type Tutor struct {
@@ -69,6 +81,7 @@ type Tutor struct {
 	tools     []Tool
 	db        *sql.DB
 	userFacts []string
+	inQuiz    bool
 }
 
 func NewTutor(config Config) (Tutor, error) {
@@ -109,7 +122,11 @@ func (t *Tutor) callModel(prompt string) (string, error) {
 		var msg ChatMessage
 		var err error
 		for {
-			msg, err = t.client.sendRequest(t.config.Model, t.messages, t.tools)
+			activeTools := t.tools
+		if t.inQuiz {
+			activeTools = quizTools
+		}
+		msg, err = t.client.sendRequest(t.config.Model, t.messages, activeTools)
 			//fmt.Printf("msg: %+v\n", msg)
 			if err != nil {
 				return "", err
@@ -170,8 +187,10 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 			return "error fetching due terms"
 		}
 		if len(terms) == 0 {
+			t.inQuiz = false
 			return "no terms due for review"
 		}
+		t.inQuiz = true
 		result, _ := json.Marshal(terms)
 		return string(result)
 	case "record_quiz_result":

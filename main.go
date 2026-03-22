@@ -39,10 +39,14 @@ func main() {
 		if err != nil {
 			break
 		}
-		if line == "quit" {
+		if line == "quit" || line == "/quit" {
 			break
 		}
-		modelOutput, err := tutor.callModel(line)
+		input := line
+		if line == "/quiz" {
+			input = "Please quiz me on my problem words now."
+		}
+		modelOutput, err := tutor.callModel(input)
 		if err != nil {
 			fmt.Println("error:", err)
 			continue
