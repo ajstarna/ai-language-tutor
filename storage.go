@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -96,5 +98,41 @@ func recordResult(db *sql.DB, term string, passed bool) error {
 			next_review_date = datetime('now', '+' || (CASE WHEN ? THEN interval * ? ELSE 1 END) || ' days')
 		WHERE term = ?
 	`, passed, passed, intervalMultiplier, passed, intervalMultiplier, term)
+	return err
+}
+
+func profilePath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return filepath.Join(homeDir, ".goodfriendstutor", "profile.txt")
+}
+
+func loadUserFacts() []string {
+	f, err := os.Open(profilePath())
+	if err != nil {
+		return nil // file doesn't exist yet, that's fine
+	}
+	defer f.Close()
+
+	var facts []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			facts = append(facts, line)
+		}
+	}
+	return facts
+}
+
+func appendUserFact(fact string) error {
+	f, err := os.OpenFile(profilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(fact + "\n")
 	return err
 }

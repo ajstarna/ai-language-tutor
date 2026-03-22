@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/chzyer/readline"
 )
 
 var tutorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("183"))
@@ -23,22 +22,32 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Print(promptStyle.Render("> "))
-	scanner := bufio.NewScanner(os.Stdin)
+	greeting, err := tutor.callModel("Greet the student warmly and ask what they'd like to work on today.")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(tutorStyle.Render(greeting))
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	rl, err := readline.New(promptStyle.Render("> "))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rl.Close()
+
+	for {
+		line, err := rl.Readline()
+		if err != nil {
+			break
+		}
 		if line == "quit" {
 			break
 		}
 		modelOutput, err := tutor.callModel(line)
 		if err != nil {
 			fmt.Println("error:", err)
-			fmt.Print(promptStyle.Render("> "))
 			continue
 		}
 		fmt.Println(tutorStyle.Render(modelOutput))
-		fmt.Print(promptStyle.Render("> "))
 	}
 
 }

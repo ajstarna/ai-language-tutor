@@ -21,6 +21,10 @@ type RecordQuizResultArgs struct {
 	Passed bool   `json:"passed"`
 }
 
+type StoreUserFactArgs struct {
+	Fact string `json:"fact"`
+}
+
 type Property struct {
 	Type        string `json:"type"`
 	Description string `json:"description"`
@@ -101,4 +105,22 @@ var storeProblemWord = Tool{
 	},
 }
 
-var allTools = []Tool{getDueWords, recordQuizResult, storeProblemWord}
+var storeUserFact = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "store_user_fact",
+		Description: "Store a personal fact about the student that is worth remembering for future conversations, such as their name, job, hobbies, family, or interests.",
+		Parameters: Parameters{
+			Type: "object",
+			Properties: map[string]Property{
+				"fact": {
+					Type:        "string",
+					Description: "a concise fact about the student, e.g. 'has a baby', 'works as a firefighter'",
+				},
+			},
+			Required: []string{"fact"},
+		},
+	},
+}
+
+var allTools = []Tool{getDueWords, recordQuizResult, storeProblemWord, storeUserFact}

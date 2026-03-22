@@ -16,39 +16,59 @@ type ChatMessage struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-func buildSystemPrompt(config Config) string {
+func buildSystemPrompt(config Config, userFacts []string) string {
 
 	var languageInstruction string
+	var languageWarning string
 	switch config.TutorLanguage {
 	case TutorLanguageSource:
 		languageInstruction = fmt.Sprintf("Respond in %s (the student's native language).", config.SourceLanguage)
+		languageWarning = fmt.Sprintf("IMPORTANT: You MUST respond only in %s. Do NOT use any other language — not even a single word or phrase.", config.SourceLanguage)
 	case TutorLanguageTarget:
 		languageInstruction = fmt.Sprintf("Respond in %s (the language they are learning).", config.TargetLanguage)
+		languageWarning = fmt.Sprintf("IMPORTANT: You MUST respond only in %s. Do NOT use any other language — not even a single word or phrase.", config.TargetLanguage)
 	case TutorLanguageMixed:
-		languageInstruction = fmt.Sprintf("Mix %s and %s in your responses.", config.TargetLanguage, config.SourceLanguage)
+		languageInstruction = fmt.Sprintf("Respond mainly in %s but naturally sprinkle in simple %s words and phrases to help the student learn.", config.SourceLanguage, config.TargetLanguage)
+		languageWarning = fmt.Sprintf("IMPORTANT: Use your judgement on the mix — lean on %s for clarity but introduce %s vocabulary and short phrases naturally as the conversation flows.", config.SourceLanguage, config.TargetLanguage)
+	}
+
+	var factsSection string
+	if len(userFacts) > 0 {
+		factsSection = "What you know about the student:\n"
+		for _, f := range userFacts {
+			factsSection += "  - " + f + "\n"
+		}
 	}
 
 	prompt := fmt.Sprintf(`You are a language tutor.
   The student speaks %s and is learning %s.
   %s
+  %s
+  %s
   Mode, i.e. whether you guide them in lessons, just converse with them, or a mix of conversation that breaks into mini lessons: %s
-  Strictness (1-3), i.e. how often you will correct their written mistakes: %d
-
-  When the student makes a grammar or vocabulary mistake with a specific word, you MUST call the store_problem_word tool with the CORRECT form of the word (not the student's incorrect version) and the sentence they used it in. Then correct them naturally in your reply. Do NOT store simple typos (e.g. "biin" instead of "bin") — only store genuine vocabulary or grammar mistakes worth reviewing later.
+  Strictness level: %d. When the student makes a mistake, whether to correct it and store it depends on the strictness level:
+    Level 1 — only correct and store serious mistakes that impede understanding. Ignore minor errors.
+    Level 2 — correct and store most grammatical and vocabulary mistakes, but use judgement on minor ones.
+    Level 3 — correct and store every mistake, no matter how small.
+  When you do correct a mistake, call store_problem_word with the CORRECT form of the word (not the student's incorrect version) and the sentence they used it in. Then in your reply briefly explain what was wrong, what the correct form is, and why — keep it concise but informative. Never store simple typos (e.g. "biin" instead of "bin") regardless of strictness level.
   When the student asks to be quizzed or you decide it is a good time to quiz them, call the get_due_words tool to retrieve words due for review, then quiz them one word at a time using this exact two-step format:
     Step 1: Ask "What does [term] mean?" and wait for their answer.
     Step 2: Ask them to use the term correctly in a sentence and wait for their answer.
-  Only after both steps are complete, call record_quiz_result — pass=true only if they answered both steps correctly. Then move on to the next word.`, config.SourceLanguage,
-		config.TargetLanguage, languageInstruction, config.Mode, config.Strictness)
+  Only after both steps are complete, call record_quiz_result — pass=true only if they answered both steps correctly. Then move on to the next word.
+  IMPORTANT: During a quiz, do NOT call store_problem_word — even if the student makes a mistake. Only call record_quiz_result to record the outcome.
+  After every tool call you MUST always follow up with a response to the student — never leave the conversation silent after a tool call.
+  When the student mentions something personal about themselves (name, job, hobbies, family, etc.) that is worth remembering, call store_user_fact with a concise summary of the fact.`, config.SourceLanguage,
+		config.TargetLanguage, languageInstruction, languageWarning, factsSection, config.Mode, config.Strictness)
 	return prompt
 }
 
 type Tutor struct {
-	config   Config
-	client   Client
-	messages []ChatMessage
-	tools    []Tool
-	db   *sql.DB
+	config    Config
+	client    Client
+	messages  []ChatMessage
+	tools     []Tool
+	db        *sql.DB
+	userFacts []string
 }
 
 func NewTutor(config Config) (Tutor, error) {
@@ -61,13 +81,18 @@ func NewTutor(config Config) (Tutor, error) {
 		apiKey:  key,
 	}
 
-	systemPrompt := buildSystemPrompt(config)
-	fmt.Println(systemPrompt)
+	userFacts := loadUserFacts()
+	systemPrompt := buildSystemPrompt(config, userFacts)
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
 
 	db := openDB()
 
-	return Tutor{config: config, client: client, messages: messages, tools: allTools, db: db}, nil
+	return Tutor{config: config, client: client, messages: messages, tools: allTools, db: db, userFacts: userFacts}, nil
+}
+
+// rebuildSystemMessage updates the first message (system prompt) with the latest user facts.
+func (t *Tutor) rebuildSystemMessage() {
+	t.messages[0] = ChatMessage{Role: "system", Content: buildSystemPrompt(t.config, t.userFacts)}
 }
 
 func (t *Tutor) callModel(prompt string) (string, error) {
@@ -163,6 +188,18 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 			return "error recording result"
 		}
 		return "recorded successfully"
+	case "store_user_fact":
+		var args StoreUserFactArgs
+		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+			return "error parsing arguments"
+		}
+		fmt.Println(toolStyle.Render("⟳ Remembering: \"" + args.Fact + "\""))
+		if err := appendUserFact(args.Fact); err != nil {
+			return "error storing fact"
+		}
+		t.userFacts = append(t.userFacts, args.Fact)
+		t.rebuildSystemMessage()
+		return "stored successfully"
 	default:
 		return "unknown tool"
 	}
