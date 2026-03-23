@@ -39,8 +39,31 @@ func main() {
 		if err != nil {
 			break
 		}
-		if line == "quit" || line == "/quit" {
-			break
+		switch line {
+		case "quit", "/quit":
+			return
+		case "/help":
+			fmt.Println(toolStyle.Render("Available commands:"))
+			fmt.Println(toolStyle.Render("  /quiz     — start a vocabulary quiz"))
+			fmt.Println(toolStyle.Render("  /endquiz  — exit quiz mode early"))
+			fmt.Println(toolStyle.Render("  /config   — change a setting"))
+			fmt.Println(toolStyle.Render("  /help     — show this help"))
+			fmt.Println(toolStyle.Render("  /quit     — exit the tutor"))
+			continue
+		case "/endquiz":
+			tutor.inQuiz = false
+			fmt.Println(toolStyle.Render("Quiz ended."))
+			continue
+		case "/config":
+			newConfig, changed := editConfig(tutor.config)
+			if changed {
+				tutor.config = newConfig
+				tutor.rebuildSystemMessage()
+				fmt.Println(toolStyle.Render("Config updated."))
+			} else {
+				fmt.Println(toolStyle.Render("Cancelled."))
+			}
+			continue
 		}
 		input := line
 		if line == "/quiz" {

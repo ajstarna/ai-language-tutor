@@ -231,7 +231,7 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		}
 		if len(terms) == 0 {
 			t.inQuiz = false
-			return "no terms due for review"
+			return "no terms due for review — quiz is over"
 		}
 		t.inQuiz = true
 		result, _ := json.Marshal(terms)

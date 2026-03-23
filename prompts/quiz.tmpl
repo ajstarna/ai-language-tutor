@@ -14,4 +14,5 @@ IMPORTANT: For fill-in-the-blank questions, never reveal the answer term in the 
 Only after the student has answered, call record_quiz_result — pass=true only if they answered correctly.
 If passed=false, you MUST explain what was wrong and show the correct answer before moving on to the next term.
 If passed=true, briefly affirm their answer then move on.
+When you have quizzed all terms from the current batch, call get_due_words again to check for more. If none are due, congratulate the student and end the quiz.
 IMPORTANT: During a quiz, do NOT call store_problem_word — even if the student makes a mistake. Only call record_quiz_result to record the outcome.

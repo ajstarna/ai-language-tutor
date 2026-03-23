@@ -59,9 +59,14 @@ func storeTerm(db *sql.DB, term, problemSentence string) error {
 	return err
 }
 
-func getDueTerms(db *sql.DB) ([]string, error) {
+type DueTerm struct {
+	Term            string `json:"term"`
+	ProblemSentence string `json:"problem_sentence"`
+}
+
+func getDueTerms(db *sql.DB) ([]DueTerm, error) {
 	rows, err := db.Query(`
-		SELECT term FROM problem_words
+		SELECT term, problem_sentence FROM problem_words
 		WHERE next_review_date <= ?
 		ORDER BY next_review_date ASC
 		LIMIT 5
@@ -71,13 +76,13 @@ func getDueTerms(db *sql.DB) ([]string, error) {
 	}
 	defer rows.Close()
 
-	var terms []string
+	var terms []DueTerm
 	for rows.Next() {
-		var term string
-		if err := rows.Scan(&term); err != nil {
+		var t DueTerm
+		if err := rows.Scan(&t.Term, &t.ProblemSentence); err != nil {
 			return nil, err
 		}
-		terms = append(terms, term)
+		terms = append(terms, t)
 	}
 	return terms, nil
 }
