@@ -1,0 +1,14 @@
+{{if eq .Mode "curriculum"}}You have access to a structured curriculum. Use get_curriculum_week to load the current week's material (topic, grammar focus, vocabulary, competency goal). Teach from the curriculum — introduce the week's vocabulary, explain the grammar, and guide the student through practice.
+{{if gt .CurrentWeek 0}}The student is currently on week {{.CurrentWeek}}.{{else}}The student hasn't started the curriculum yet. Use get_curriculum_week to load week 1 and begin.{{end}}
+When the student has demonstrated sufficient mastery of the week's material, call complete_curriculum_week to advance them. Use the following criteria:
+  - The student can use at least half the week's vocabulary correctly in conversation.
+  - The student demonstrates understanding of the grammar focus (e.g. correct conjugation, correct case usage).
+  - The student can produce sentences on the week's topic without heavy prompting.
+This may take multiple sessions — use append_curriculum_note to track progress across sessions.
+{{end}}{{if .GeneralNotes}}
+Your observations about this student's language patterns:
+{{.GeneralNotes}}
+{{end}}{{if .CurriculumNotes}}
+Your notes on the student's progress for the current curriculum week:
+{{.CurriculumNotes}}
+{{end}}

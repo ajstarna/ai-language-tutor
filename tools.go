@@ -16,6 +16,15 @@ type StoreProblemWordArgs struct {
 	ProblemSentence string `json:"problem_sentence"`
 }
 
+type TaughtTerm struct {
+	Term       string `json:"term"`
+	Definition string `json:"definition"`
+}
+
+type StoreTaughtTermsArgs struct {
+	Words []TaughtTerm `json:"words"`
+}
+
 type RecordQuizResultArgs struct {
 	Term   string `json:"term"`
 	Passed bool   `json:"passed"`
@@ -25,9 +34,20 @@ type StoreUserFactArgs struct {
 	Fact string `json:"fact"`
 }
 
+type AppendNoteArgs struct {
+	Note string `json:"note"`
+}
+
+type GetCurriculumWeekArgs struct {
+	Week int `json:"week,omitempty"`
+}
+
 type Property struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Type        string              `json:"type"`
+	Description string              `json:"description,omitempty"`
+	Items       *Property           `json:"items,omitempty"`
+	Properties  map[string]Property `json:"properties,omitempty"`
+	Required    []string            `json:"required,omitempty"`
 }
 
 type Parameters struct {
@@ -52,7 +72,7 @@ var getDueWords = Tool{
 	Type: "function",
 	Function: ToolFunction{
 		Name:        "get_due_words",
-		Description: "Retrieve words that are due for review based on spaced repetition scheduling",
+		Description: "Retrieve terms that are due for review based on spaced repetition scheduling",
 		Parameters: Parameters{
 			Type:       "object",
 			Properties: map[string]Property{},
@@ -65,7 +85,7 @@ var recordQuizResult = Tool{
 	Type: "function",
 	Function: ToolFunction{
 		Name:        "record_quiz_result",
-		Description: "Record whether the user passed or failed a quiz on a given word, used to update the spaced repetition interval",
+		Description: "Record whether the user passed or failed a quiz on a given term, used to update the spaced repetition interval",
 		Parameters: Parameters{
 			Type: "object",
 			Properties: map[string]Property{
@@ -123,5 +143,108 @@ var storeUserFact = Tool{
 	},
 }
 
-var allTools  = []Tool{getDueWords, recordQuizResult, storeProblemWord, storeUserFact}
+var storeTaughtTermsTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "store_taught_words",
+		Description: "After teaching the student new vocabulary (e.g. during a topic), call this to save the terms for future quizzing via spaced repetition.",
+		Parameters: Parameters{
+			Type: "object",
+			Properties: map[string]Property{
+				"words": {
+					Type:        "array",
+					Description: "list of terms that were taught",
+					Items: &Property{
+						Type: "object",
+						Properties: map[string]Property{
+							"term": {
+								Type:        "string",
+								Description: "the term in the target language",
+							},
+							"definition": {
+								Type:        "string",
+								Description: "short definition or translation in the student's native language",
+							},
+						},
+						Required: []string{"term", "definition"},
+					},
+				},
+			},
+			Required: []string{"words"},
+		},
+	},
+}
+
+var getCurriculumWeekTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "get_curriculum_week",
+		Description: "Load the curriculum data for a specific week (topic, grammar focus, vocabulary, competency goal). If no week is specified, loads the student's current week.",
+		Parameters: Parameters{
+			Type: "object",
+			Properties: map[string]Property{
+				"week": {
+					Type:        "integer",
+					Description: "week number to load (optional — defaults to current week)",
+				},
+			},
+			Required: []string{},
+		},
+	},
+}
+
+var completeCurriculumWeekTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "complete_curriculum_week",
+		Description: "Mark the current curriculum week as completed and advance to the next week. Only call this when the student has demonstrated sufficient mastery of the week's material.",
+		Parameters: Parameters{
+			Type:       "object",
+			Properties: map[string]Property{},
+			Required:   []string{},
+		},
+	},
+}
+
+var appendGeneralNoteTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "append_general_note",
+		Description: "Save an observation about the student's language ability or patterns. Use this during free conversation when you notice something worth remembering across sessions (e.g. 'avoids subjunctive', 'comfortable with past tense', 'tends to forget article genders').",
+		Parameters: Parameters{
+			Type: "object",
+			Properties: map[string]Property{
+				"note": {
+					Type:        "string",
+					Description: "a concise observation about the student's language skills",
+				},
+			},
+			Required: []string{"note"},
+		},
+	},
+}
+
+var appendCurriculumNoteTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "append_curriculum_note",
+		Description: "Save a progress observation for the current curriculum week. Use this when the student demonstrates understanding or struggle with the week's material (e.g. 'understands werden + infinitive for future tense', 'struggling with dative prepositions, keeps using accusative after mit').",
+		Parameters: Parameters{
+			Type: "object",
+			Properties: map[string]Property{
+				"note": {
+					Type:        "string",
+					Description: "a concise observation about the student's progress on this week's material",
+				},
+			},
+			Required: []string{"note"},
+		},
+	},
+}
+
+var allTools = []Tool{
+	getDueWords, recordQuizResult, storeProblemWord, storeTaughtTermsTool,
+	storeUserFact, getCurriculumWeekTool, completeCurriculumWeekTool,
+	appendGeneralNoteTool, appendCurriculumNoteTool,
+}
 var quizTools = []Tool{getDueWords, recordQuizResult, storeUserFact}

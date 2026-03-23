@@ -1,11 +1,17 @@
 - differences between curriculum mode and conversational mode more clear (frequency lists? lessons?)
-- the quiz could be more interesting. Fill in blanks and stuff
 - curriculum mode should have topics for language learning kinda in order. The model should indicate what levels/skills the user knows.
 - model should note if user uses a language feature passively and indicate they passed that part of the curriculum
 
-- ability to show which commands are available such as /quiz
 - some way to have like temporary working memory? To not flood the entire chat history? Is this common practice? One-time changes to system prompt?
 
 *****
 - more gamified and Mode based. curriculum. free-chat. topic challenge. vocab quiz
 - maybe a user could say they want to learn vocab relating to a certain topic, like 20 words. The model would provide the words then the user needs to use them in sentences. Some sort of topic-mode. Maybe it could be more gamified. Like we are entering a topic-round, and the user must use all 20 words in a conversation to win?
+
+
+
+======
+To test with my phone, ssh into a server with some sort of terminal app
+=====
+Productionize.
+Host on a server. Need a way for users to login.
