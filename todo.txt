@@ -1,8 +1,6 @@
 - differences between curriculum mode and conversational mode more clear (frequency lists? lessons?)
 - the quiz could be more interesting. Fill in blanks and stuff
 - curriculum mode should have topics for language learning kinda in order. The model should indicate what levels/skills the user knows.
-- the tutor should be able to store memories about the user. e.g. they have a baby, their name, etc
-- if conversations get too long, we should compress
 - model should note if user uses a language feature passively and indicate they passed that part of the curriculum
 
 - ability to show which commands are available such as /quiz

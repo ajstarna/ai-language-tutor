@@ -15,13 +15,6 @@ import (
 //go:embed prompts/*.tmpl
 var promptFiles embed.FS
 
-type ChatMessage struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-}
-
 type promptData struct {
 	SourceLanguage      string
 	TargetLanguage      string
@@ -103,12 +96,59 @@ func NewTutor(config Config) (Tutor, error) {
 	return Tutor{config: config, client: client, messages: messages, tools: allTools, db: db, userFacts: userFacts}, nil
 }
 
+func (t *Tutor) Close() {
+	t.db.Close()
+}
+
 // rebuildSystemMessage updates the first message (system prompt) with the latest user facts.
 func (t *Tutor) rebuildSystemMessage() {
 	t.messages[0] = ChatMessage{Role: "system", Content: buildSystemPrompt(t.config, t.userFacts)}
 }
 
+const (
+	compressThreshold = 90 // compress when message count exceeds this
+	keepRecentCount   = 30 // number of recent messages to keep verbatim
+)
+
+// maybeCompress summarizes old messages when the conversation gets too long.
+// It keeps the system prompt and the most recent messages verbatim, replacing
+// everything in between with a fake user/assistant summary pair.
+func (t *Tutor) maybeCompress() error {
+	if len(t.messages) <= compressThreshold {
+		return nil
+	}
+
+	// messages to summarize: everything between system prompt and the recent window
+	toSummarize := t.messages[1 : len(t.messages)-keepRecentCount]
+
+	// ask the model to summarize the old messages
+	summaryRequest := append(toSummarize, ChatMessage{
+		Role:    "user",
+		Content: "Please summarize the conversation so far in a few concise sentences, focusing on what the student has learned, mistakes they've made, and any personal details mentioned.",
+	})
+	summary, err := t.client.sendRequest(t.config.Model, summaryRequest, nil)
+	if err != nil {
+		return err
+	}
+
+	// clone recent messages — the slice references the same backing array we're about to overwrite
+	recent := append([]ChatMessage{}, t.messages[len(t.messages)-keepRecentCount:]...)
+	t.messages = append(
+		[]ChatMessage{
+			t.messages[0], // system prompt
+			{Role: "user", Content: "Summary of earlier conversation:"},
+			{Role: "assistant", Content: summary.Content},
+		},
+		recent...,
+	)
+	return nil
+}
+
 func (t *Tutor) callModel(prompt string) (string, error) {
+	if err := t.maybeCompress(); err != nil {
+		fmt.Println("warning: could not compress conversation:", err)
+	}
+
 	newMessage := ChatMessage{Role: "user", Content: prompt}
 	t.messages = append(t.messages, newMessage)
 
@@ -173,18 +213,21 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 	case "store_problem_word":
 		var args StoreProblemWordArgs
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-			return "error parsing arguments"
+			log.Printf("store_problem_word: bad arguments: %v", err)
+			return "error: could not parse arguments — expected {\"term\": \"...\", \"problem_sentence\": \"...\"}"
 		}
 		fmt.Println(toolStyle.Render("⟳ Saving problem term: \"" + args.Term + "\""))
 		if err := storeTerm(t.db, args.Term, args.ProblemSentence); err != nil {
-			return "error storing term"
+			log.Printf("store_problem_word: db error: %v", err)
+			return "error: failed to store term in database"
 		}
 		return "stored successfully"
 	case "get_due_words":
 		fmt.Println(toolStyle.Render("⟳ Fetching due words..."))
 		terms, err := getDueTerms(t.db)
 		if err != nil {
-			return "error fetching due terms"
+			log.Printf("get_due_words: db error: %v", err)
+			return "error: failed to fetch due terms from database"
 		}
 		if len(terms) == 0 {
 			t.inQuiz = false
@@ -196,7 +239,8 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 	case "record_quiz_result":
 		var args RecordQuizResultArgs
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-			return "error parsing arguments"
+			log.Printf("record_quiz_result: bad arguments: %v", err)
+			return "error: could not parse arguments — expected {\"term\": \"...\", \"passed\": true/false}"
 		}
 		passed := "✗"
 		if args.Passed {
@@ -204,22 +248,25 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		}
 		fmt.Println(toolStyle.Render("⟳ Recording quiz result for: \"" + args.Term + "\" " + passed))
 		if err := recordResult(t.db, args.Term, args.Passed); err != nil {
-			return "error recording result"
+			log.Printf("record_quiz_result: db error: %v", err)
+			return "error: failed to record quiz result for term \"" + args.Term + "\""
 		}
 		return "recorded successfully"
 	case "store_user_fact":
 		var args StoreUserFactArgs
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-			return "error parsing arguments"
+			log.Printf("store_user_fact: bad arguments: %v", err)
+			return "error: could not parse arguments — expected {\"fact\": \"...\"}"
 		}
 		fmt.Println(toolStyle.Render("⟳ Remembering: \"" + args.Fact + "\""))
 		if err := appendUserFact(args.Fact); err != nil {
-			return "error storing fact"
+			log.Printf("store_user_fact: file error: %v", err)
+			return "error: failed to save user fact to profile"
 		}
 		t.userFacts = append(t.userFacts, args.Fact)
 		t.rebuildSystemMessage()
 		return "stored successfully"
 	default:
-		return "unknown tool"
+		return "error: unknown tool \"" + toolCall.Function.Name + "\""
 	}
 }

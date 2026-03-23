@@ -9,6 +9,13 @@ import (
 	"net/http"
 )
 
+type ChatMessage struct {
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
 type Client struct {
 	baseURL string
 	apiKey  string

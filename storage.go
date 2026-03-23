@@ -47,12 +47,12 @@ func storeTerm(db *sql.DB, term, problemSentence string) error {
 	now := time.Now()
 	nextReview := now  // immediately available for review
 
-	// upsert: if term already exists, append the new sentence and reset next_review_date
+	// upsert: if term already exists, append the new sentence (separated by newline) and reset review schedule
 	_, err := db.Exec(`
 		INSERT INTO problem_words (term, problem_sentence, created_at, next_review_date)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(term) DO UPDATE SET
-			problem_sentence = excluded.problem_sentence,
+			problem_sentence = problem_sentence || char(10) || excluded.problem_sentence,
 			next_review_date = excluded.next_review_date,
 			interval = 1
 	`, term, problemSentence, now, nextReview)
@@ -83,21 +83,31 @@ func getDueTerms(db *sql.DB) ([]string, error) {
 }
 
 func recordResult(db *sql.DB, term string, passed bool) error {
-	var intervalMultiplier int
+	// Read current interval first, then compute the new one in Go
+	// to avoid SQL evaluation order issues between interval and next_review_date.
+	var currentInterval int
+	if err := db.QueryRow(`SELECT interval FROM problem_words WHERE term = ?`, term).Scan(&currentInterval); err != nil {
+		return err
+	}
+
+	var newInterval int
+	var correctInc int
 	if passed {
-		intervalMultiplier = 2
+		newInterval = currentInterval * 2
+		correctInc = 1
 	} else {
-		intervalMultiplier = 1
+		newInterval = 1
+		correctInc = 0
 	}
 
 	_, err := db.Exec(`
 		UPDATE problem_words SET
 			times_seen = times_seen + 1,
-			times_correct = times_correct + CASE WHEN ? THEN 1 ELSE 0 END,
-			interval = CASE WHEN ? THEN interval * ? ELSE 1 END,
-			next_review_date = datetime('now', '+' || (CASE WHEN ? THEN interval * ? ELSE 1 END) || ' days')
+			times_correct = times_correct + ?,
+			interval = ?,
+			next_review_date = datetime('now', '+' || ? || ' days')
 		WHERE term = ?
-	`, passed, passed, intervalMultiplier, passed, intervalMultiplier, term)
+	`, correctInc, newInterval, newInterval, term)
 	return err
 }
 

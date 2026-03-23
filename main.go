@@ -15,12 +15,12 @@ var toolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Italic(t
 func main() {
 
 	config := loadConfig()
-	fmt.Println(config)
 
 	tutor, err := NewTutor(config)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer tutor.Close()
 
 	greeting, err := tutor.callModel("Greet the student warmly and ask what they'd like to work on today.")
 	if err != nil {
