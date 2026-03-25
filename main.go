@@ -3,11 +3,45 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/chzyer/readline"
 )
+
+var modelPresets = []struct {
+	label string
+	id    string
+}{
+	{"Haiku (fast, cheap)", "anthropic/claude-haiku-4-5-20251001"},
+	{"Sonnet (balanced)", "anthropic/claude-sonnet-4-6"},
+	{"GPT-5.4 Mini (fast, cheap)", "openai/gpt-5.4-mini"},
+}
+
+func pickModel(rl *readline.Instance, current string) string {
+	fmt.Printf("Current model: %s\n", current)
+	for i, p := range modelPresets {
+		fmt.Printf("  %d. %s (%s)\n", i+1, p.label, p.id)
+	}
+	fmt.Println("  Or type a model ID directly. Enter to cancel.")
+
+	rl.SetPrompt(promptStyle.Render("model> "))
+	defer rl.SetPrompt(promptStyle.Render("> "))
+
+	line, err := rl.Readline()
+	if err != nil {
+		return ""
+	}
+	input := strings.TrimSpace(line)
+	if input == "" {
+		return ""
+	}
+	if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(modelPresets) {
+		return modelPresets[n-1].id
+	}
+	return input // custom model ID
+}
 
 var tutorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("183"))
 var promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
@@ -29,8 +63,8 @@ func main() {
 	fmt.Println(bannerStyle.Render(banner))
 
 	config := loadConfig()
-	fmt.Println(subtitleStyle.Render(fmt.Sprintf("  %s → %s  |  model: %s  |  strictness: %d",
-		config.SourceLanguage, config.TargetLanguage, config.Model, config.Strictness)))
+	fmt.Println(subtitleStyle.Render(fmt.Sprintf("  Learning: %s  |  mode: %s  |  model: %s  |  strictness: %d",
+		config.TargetLanguage, config.Mode, config.Model, config.Strictness)))
 	fmt.Println(subtitleStyle.Render("  Try /topic to learn new vocabulary, /quiz to review, /help for more"))
 	fmt.Println()
 
@@ -40,7 +74,13 @@ func main() {
 	}
 	defer tutor.Close()
 
-	greeting, err := tutor.callModel("Greet the student warmly. Suggest they pick a topic to learn new vocabulary (they can use /topic), or just chat freely. Keep it short.")
+	var greetingPrompt string
+	if config.Mode == ModeCurriculum {
+		greetingPrompt = "Greet the student warmly. Then call get_curriculum_week to load the current week's material and begin teaching."
+	} else {
+		greetingPrompt = "Greet the student warmly. Suggest they pick a topic to learn new vocabulary (they can use /topic), or just chat freely. Keep it short."
+	}
+	greeting, err := tutor.callModel(greetingPrompt)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,6 +106,7 @@ func main() {
 			fmt.Println(toolStyle.Render("  /endquiz       — exit quiz mode early"))
 			fmt.Println(toolStyle.Render("  /topic [theme] — learn vocab for a topic (random if no theme)"))
 			fmt.Println(toolStyle.Render("  /week          — show current curriculum week"))
+			fmt.Println(toolStyle.Render("  /model         — switch the AI model"))
 			fmt.Println(toolStyle.Render("  /config        — change a setting"))
 			fmt.Println(toolStyle.Render("  /help          — show this help"))
 			fmt.Println(toolStyle.Render("  /quit          — exit the tutor"))
@@ -75,7 +116,7 @@ func main() {
 			fmt.Println(toolStyle.Render("Quiz ended."))
 			continue
 		case "/week":
-			week := getCurrentWeek(tutor.db)
+			week := getCurrentWeek(tutor.db, tutor.config.TargetLanguage)
 			if week == 0 {
 				fmt.Println(toolStyle.Render("No curriculum week started yet. Use curriculum mode to begin."))
 			} else {
@@ -87,6 +128,18 @@ func main() {
 				} else {
 					fmt.Println(toolStyle.Render(fmt.Sprintf("  Week %d (not found in curriculum)", week)))
 				}
+			}
+			continue
+		case "/model":
+			newModel := pickModel(rl, tutor.config.Model)
+			if newModel != "" && newModel != tutor.config.Model {
+				tutor.config.Model = newModel
+				if err := saveConfig(tutor.config); err != nil {
+					fmt.Println("warning: could not save config:", err)
+				}
+				fmt.Println(toolStyle.Render("Model set to " + newModel))
+			} else {
+				fmt.Println(toolStyle.Render("Cancelled."))
 			}
 			continue
 		case "/config":

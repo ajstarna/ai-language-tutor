@@ -34,6 +34,10 @@ type StoreUserFactArgs struct {
 	Fact string `json:"fact"`
 }
 
+type SearchCurriculumArgs struct {
+	Query string `json:"query"`
+}
+
 type AppendNoteArgs struct {
 	Note string `json:"note"`
 }
@@ -242,9 +246,40 @@ var appendCurriculumNoteTool = Tool{
 	},
 }
 
+var searchCurriculumTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "search_curriculum",
+		Description: "Search the curriculum for weeks that cover a specific grammar concept or topic. Use this when the student is struggling with something and you want to find where it was originally taught.",
+		Parameters: Parameters{
+			Type: "object",
+			Properties: map[string]Property{
+				"query": {
+					Type:        "string",
+					Description: "the concept to search for, e.g. 'dative prepositions', 'past tense', 'modal verbs'",
+				},
+			},
+			Required: []string{"query"},
+		},
+	},
+}
+
+var getWeekProgressTool = Tool{
+	Type: "function",
+	Function: ToolFunction{
+		Name:        "get_week_progress",
+		Description: "Check the student's progress on the current curriculum week's vocabulary. Returns how many terms have been stored, and how many are 'learned' (passed quiz at least twice). Use this to decide if the student is ready to advance.",
+		Parameters: Parameters{
+			Type:       "object",
+			Properties: map[string]Property{},
+			Required:   []string{},
+		},
+	},
+}
+
 var allTools = []Tool{
 	getDueWords, recordQuizResult, storeProblemWord, storeTaughtTermsTool,
 	storeUserFact, getCurriculumWeekTool, completeCurriculumWeekTool,
-	appendGeneralNoteTool, appendCurriculumNoteTool,
+	getWeekProgressTool, searchCurriculumTool, appendGeneralNoteTool, appendCurriculumNoteTool,
 }
 var quizTools = []Tool{getDueWords, recordQuizResult, storeUserFact}

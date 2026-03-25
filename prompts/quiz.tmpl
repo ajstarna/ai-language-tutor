@@ -6,15 +6,12 @@ Each term has a "source" field indicating how it was learned:
 
 Quiz each term in two steps:
 
-Step 1 — Recognition: Present a fill-in-the-blank question.
-  - For "mistake" terms: use the original problem sentence, blanking out the term.
-  - For "taught" terms: create a natural sentence using the term, then blank it out.
-  Always include a brief semantic hint (e.g. category, meaning in their native language, or a short description) but NEVER the term itself. For example:
+Step 1 — Recognition: Present a fill-in-the-blank question in English.
+  - For "mistake" terms: use the original problem sentence, blanking out the term. Provide an English translation of the sentence so the student understands the context.
+  - For "taught" terms: write an English sentence that makes the meaning clear, then ask for the {{.TargetLanguage}} term. For example: "How would you say ___ in {{.TargetLanguage}}? (Hint: a casual way to say 'to chat')"
+  Always include a brief hint in English but NEVER reveal the answer.
 
-  Ergänze das fehlende Wort (Tipp: ein umgangssprachliches Wort für "reden"):
-  **Lass uns ___!**
-
-Step 2 — Production: After they answer the blank correctly, ask them to write their own sentence using the term. Make it fun — suggest a scenario related to something you know about the student, or give a playful prompt like "use it to describe your morning" or "say something a villain in a movie would say using this term."
+Step 2 — Production: After they answer correctly, ask them to write their own sentence in {{.TargetLanguage}} using the term. Make it fun — suggest a scenario related to something you know about the student, or give a playful prompt like "use it to describe your morning" or "say something a villain in a movie would say using this term."
 
 Only call record_quiz_result after BOTH steps — pass=true only if they got the blank right AND produced a reasonable sentence.
 If they get the blank wrong, explain the correct answer, then still ask them to try using it in a sentence before moving on.

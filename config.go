@@ -24,13 +24,12 @@ const (
 type TutorLanguage string
 
 const (
-	TutorLanguageSource TutorLanguage = "source"
+	TutorLanguageEnglish TutorLanguage = "english"
 	TutorLanguageTarget TutorLanguage = "target"
 	TutorLanguageMixed  TutorLanguage = "mixed"
 )
 
 type Config struct {
-	SourceLanguage string
 	TargetLanguage string
 	TutorLanguage  TutorLanguage
 	Mode           Mode
@@ -84,10 +83,6 @@ func saveConfig(config Config) error {
 func promptConfig(configPath string) Config {
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("What language do you currently speak")
-	scanner.Scan()
-	source := scanner.Text()
-
 	fmt.Println("What language do you want to learn?")
 	scanner.Scan()
 	target := scanner.Text()
@@ -95,7 +90,7 @@ func promptConfig(configPath string) Config {
 	var tutorLang TutorLanguage
 	var err error
 	for {
-		fmt.Println("What language should your tutor speak: ('source', 'target', 'mixed'):")
+		fmt.Println("What language should your tutor speak: ('english', 'target', 'mixed'):")
 		scanner.Scan()
 		tutorLang, err = parseTutorLanguage(scanner.Text())
 		if err == nil {
@@ -125,12 +120,11 @@ func promptConfig(configPath string) Config {
 	}
 
 	config := Config{
-		SourceLanguage: source,
 		TargetLanguage: target,
 		TutorLanguage:  tutorLang,
 		Mode:           mode,
 		Strictness:     strictness,
-		Model:          "google/gemini-2.0-flash-001",
+		Model:          "openai/gpt-5.4-mini",
 	}
 
 	// save for next time
@@ -151,7 +145,7 @@ func editConfig(config Config) (Config, bool) {
 	switch field {
 	case "tutor_language":
 		for {
-			fmt.Printf("Tutor language (currently %q) — enter 'source', 'target', or 'mixed':\n", config.TutorLanguage)
+			fmt.Printf("Tutor language (currently %q) — enter 'english', 'target', or 'mixed':\n", config.TutorLanguage)
 			scanner.Scan()
 			tl, err := parseTutorLanguage(scanner.Text())
 			if err == nil {
@@ -205,7 +199,7 @@ func parseMode(s string) (Mode, error) {
 
 func parseTutorLanguage(s string) (TutorLanguage, error) {
 	switch TutorLanguage(s) {
-	case TutorLanguageSource, TutorLanguageTarget, TutorLanguageMixed:
+	case TutorLanguageEnglish, TutorLanguageTarget, TutorLanguageMixed:
 		return TutorLanguage(s), nil
 	default:
 		return "", fmt.Errorf("invalid tutor language %q", s)

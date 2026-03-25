@@ -19,8 +19,8 @@ var promptFiles embed.FS
 var syllabusFile embed.FS
 
 type VocabEntry struct {
-	De string `json:"de"`
-	En string `json:"en"`
+	Term       string `json:"term"`
+	Definition string `json:"definition"`
 }
 
 type CurriculumWeek struct {
@@ -43,22 +43,47 @@ type SyllabusFile struct {
 	Weeks    []CurriculumWeek `json:"weeks"`
 }
 
-func loadCurriculum() []CurriculumWeek {
-	data, err := syllabusFile.ReadFile("curriculum/german-a1-b1.json")
+type syllabusMetadata struct {
+	LanguageName string `json:"language_name"`
+}
+
+func loadCurriculum(targetLanguage string) []CurriculumWeek {
+	entries, err := syllabusFile.ReadDir("curriculum")
 	if err != nil {
-		log.Printf("warning: could not load curriculum: %v", err)
+		log.Printf("warning: could not list curriculum files: %v", err)
 		return nil
 	}
-	var sf SyllabusFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		log.Printf("warning: could not parse curriculum: %v", err)
-		return nil
+	target := strings.ToLower(targetLanguage)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := syllabusFile.ReadFile("curriculum/" + entry.Name())
+		if err != nil {
+			continue
+		}
+		// check if this file's language matches
+		var peek struct {
+			Syllabus syllabusMetadata `json:"syllabus"`
+		}
+		if err := json.Unmarshal(data, &peek); err != nil {
+			continue
+		}
+		if strings.ToLower(peek.Syllabus.LanguageName) != target {
+			continue
+		}
+		var sf SyllabusFile
+		if err := json.Unmarshal(data, &sf); err != nil {
+			log.Printf("warning: could not parse curriculum %s: %v", entry.Name(), err)
+			return nil
+		}
+		return sf.Weeks
 	}
-	return sf.Weeks
+	log.Printf("warning: no curriculum found for %q", targetLanguage)
+	return nil
 }
 
 type promptData struct {
-	SourceLanguage      string
 	TargetLanguage      string
 	LanguageInstruction string
 	LanguageWarning     string
@@ -73,19 +98,18 @@ type promptData struct {
 func buildSystemPrompt(config Config, userFacts []string, currentWeek int) string {
 	var languageInstruction, languageWarning string
 	switch config.TutorLanguage {
-	case TutorLanguageSource:
-		languageInstruction = fmt.Sprintf("Respond in %s (the student's native language).", config.SourceLanguage)
-		languageWarning = fmt.Sprintf("IMPORTANT: You MUST respond only in %s. Do NOT use any other language — not even a single word or phrase.", config.SourceLanguage)
+	case TutorLanguageEnglish:
+		languageInstruction = "Respond in English (the student's native language)."
+		languageWarning = "IMPORTANT: You MUST respond only in English. Do NOT use any other language — not even a single word or phrase."
 	case TutorLanguageTarget:
 		languageInstruction = fmt.Sprintf("Respond in %s (the language they are learning).", config.TargetLanguage)
 		languageWarning = fmt.Sprintf("IMPORTANT: You MUST respond only in %s. Do NOT use any other language — not even a single word or phrase.", config.TargetLanguage)
 	case TutorLanguageMixed:
-		languageInstruction = fmt.Sprintf("Respond mainly in %s but naturally sprinkle in simple %s words and phrases to help the student learn.", config.SourceLanguage, config.TargetLanguage)
-		languageWarning = fmt.Sprintf("IMPORTANT: Use your judgement on the mix — lean on %s for clarity but introduce %s vocabulary and short phrases naturally as the conversation flows.", config.SourceLanguage, config.TargetLanguage)
+		languageInstruction = fmt.Sprintf("Respond mainly in English but naturally sprinkle in simple %s words and phrases to help the student learn.", config.TargetLanguage)
+		languageWarning = fmt.Sprintf("IMPORTANT: Use your judgement on the mix — lean on English for clarity but introduce %s vocabulary and short phrases naturally as the conversation flows.", config.TargetLanguage)
 	}
 
 	data := promptData{
-		SourceLanguage:      config.SourceLanguage,
 		TargetLanguage:      config.TargetLanguage,
 		LanguageInstruction: languageInstruction,
 		LanguageWarning:     languageWarning,
@@ -93,7 +117,7 @@ func buildSystemPrompt(config Config, userFacts []string, currentWeek int) strin
 		Strictness:          config.Strictness,
 		UserFacts:           userFacts,
 		GeneralNotes:        loadGeneralNotes(),
-		CurriculumNotes:     loadCurriculumNote(currentWeek),
+		CurriculumNotes:     loadCurriculumNote(config.TargetLanguage, currentWeek),
 		CurrentWeek:         currentWeek,
 	}
 
@@ -138,9 +162,9 @@ func NewTutor(config Config) (Tutor, error) {
 	}
 
 	userFacts := loadUserFacts()
-	curriculum := loadCurriculum()
+	curriculum := loadCurriculum(config.TargetLanguage)
 	db := openDB()
-	currentWeek := getCurrentWeek(db)
+	currentWeek := getCurrentWeek(db, config.TargetLanguage)
 
 	systemPrompt := buildSystemPrompt(config, userFacts, currentWeek)
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
@@ -154,7 +178,7 @@ func (t *Tutor) Close() {
 
 // rebuildSystemMessage updates the first message (system prompt) with the latest user facts and notes.
 func (t *Tutor) rebuildSystemMessage() {
-	currentWeek := getCurrentWeek(t.db)
+	currentWeek := getCurrentWeek(t.db, t.config.TargetLanguage)
 	t.messages[0] = ChatMessage{Role: "system", Content: buildSystemPrompt(t.config, t.userFacts, currentWeek)}
 }
 
@@ -271,6 +295,7 @@ func (t *Tutor) getCurriculumWeek(week int) *CurriculumWeek {
 }
 
 func (t *Tutor) executeTool(toolCall ToolCall) string {
+	lang := t.config.TargetLanguage
 	switch toolCall.Function.Name {
 	case "store_problem_word":
 		var args StoreProblemWordArgs
@@ -279,7 +304,7 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 			return "error: could not parse arguments — expected {\"term\": \"...\", \"problem_sentence\": \"...\"}"
 		}
 		fmt.Println(toolStyle.Render("⟳ Saving problem term: \"" + args.Term + "\""))
-		if err := storeTerm(t.db, args.Term, args.ProblemSentence, "mistake"); err != nil {
+		if err := storeMistake(t.db, lang, args.Term, args.ProblemSentence); err != nil {
 			log.Printf("store_problem_word: db error: %v", err)
 			return "error: failed to store term in database"
 		}
@@ -290,15 +315,15 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 			log.Printf("store_taught_words: bad arguments: %v", err)
 			return "error: could not parse arguments"
 		}
-		fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Saving %d taught terms...", len(args.Words))))
-		if err := storeTaughtTerms(t.db, args.Words); err != nil {
+		fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Saving %d vocab terms...", len(args.Words))))
+		if err := storeTaughtTerms(t.db, lang, args.Words); err != nil {
 			log.Printf("store_taught_words: db error: %v", err)
 			return "error: failed to store taught terms"
 		}
-		return fmt.Sprintf("stored %d terms successfully", len(args.Words))
+		return fmt.Sprintf("saved %d vocab terms", len(args.Words))
 	case "get_due_words":
 		fmt.Println(toolStyle.Render("⟳ Fetching due terms..."))
-		terms, err := getDueTerms(t.db)
+		terms, err := getDueTerms(t.db, lang)
 		if err != nil {
 			log.Printf("get_due_words: db error: %v", err)
 			return "error: failed to fetch due terms from database"
@@ -321,7 +346,7 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 			passed = "✓"
 		}
 		fmt.Println(toolStyle.Render("⟳ Recording quiz result for: \"" + args.Term + "\" " + passed))
-		if err := recordResult(t.db, args.Term, args.Passed); err != nil {
+		if err := recordResult(t.db, lang, args.Term, args.Passed); err != nil {
 			log.Printf("record_quiz_result: db error: %v", err)
 			return "error: failed to record quiz result for term \"" + args.Term + "\""
 		}
@@ -345,12 +370,12 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		json.Unmarshal([]byte(toolCall.Function.Arguments), &args) // args may be empty, that's ok
 		week := args.Week
 		if week == 0 {
-			week = getCurrentWeek(t.db)
+			week = getCurrentWeek(t.db, lang)
 		}
 		if week == 0 {
 			// no week started yet — start week 1
 			week = 1
-			startWeek(t.db, 1)
+			startWeek(t.db, lang, 1)
 		}
 		cw := t.getCurriculumWeek(week)
 		if cw == nil {
@@ -358,7 +383,7 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		}
 		fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Loading curriculum week %d: %s", week, cw.Topic)))
 		// include the week's notes alongside the curriculum data
-		notes := loadCurriculumNote(week)
+		notes := loadCurriculumNote(lang, week)
 		type weekWithNotes struct {
 			CurriculumWeek
 			Notes string `json:"notes,omitempty"`
@@ -366,7 +391,7 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		result, _ := json.Marshal(weekWithNotes{*cw, notes})
 		return string(result)
 	case "complete_curriculum_week":
-		currentWeek := getCurrentWeek(t.db)
+		currentWeek := getCurrentWeek(t.db, lang)
 		if currentWeek == 0 {
 			return "error: no curriculum week is in progress"
 		}
@@ -375,13 +400,13 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		if cw != nil {
 			topicName = fmt.Sprintf("week %d: %s", currentWeek, cw.Topic)
 		}
-		if err := completeWeek(t.db, currentWeek); err != nil {
+		if err := completeWeek(t.db, lang, currentWeek); err != nil {
 			log.Printf("complete_curriculum_week: db error: %v", err)
 			return "error: failed to complete week"
 		}
 		nextWeek := currentWeek + 1
 		if t.getCurriculumWeek(nextWeek) != nil {
-			startWeek(t.db, nextWeek)
+			startWeek(t.db, lang, nextWeek)
 			fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Completed %s — advancing to week %d", topicName, nextWeek)))
 			t.rebuildSystemMessage()
 			return fmt.Sprintf("completed %s. Now on week %d.", topicName, nextWeek)
@@ -389,6 +414,54 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 		fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Completed %s — curriculum finished!", topicName)))
 		t.rebuildSystemMessage()
 		return fmt.Sprintf("completed %s. Congratulations — the curriculum is complete!", topicName)
+	case "search_curriculum":
+		var args SearchCurriculumArgs
+		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+			log.Printf("search_curriculum: bad arguments: %v", err)
+			return "error: could not parse arguments"
+		}
+		query := strings.ToLower(args.Query)
+		fmt.Println(toolStyle.Render("⟳ Searching curriculum for: \"" + args.Query + "\""))
+		type match struct {
+			Week         int    `json:"week"`
+			CEFR         string `json:"cefr"`
+			Topic        string `json:"topic"`
+			GrammarFocus string `json:"grammar_focus"`
+		}
+		var matches []match
+		for _, cw := range t.curriculum {
+			if strings.Contains(strings.ToLower(cw.GrammarFocus), query) ||
+				strings.Contains(strings.ToLower(cw.Topic), query) {
+				matches = append(matches, match{cw.Week, cw.CEFR, cw.Topic, cw.GrammarFocus})
+			}
+		}
+		if len(matches) == 0 {
+			return "no matching weeks found for \"" + args.Query + "\""
+		}
+		result, _ := json.Marshal(matches)
+		return string(result)
+	case "get_week_progress":
+		currentWeek := getCurrentWeek(t.db, lang)
+		if currentWeek == 0 {
+			return "error: no curriculum week is in progress"
+		}
+		cw := t.getCurriculumWeek(currentWeek)
+		if cw == nil {
+			return fmt.Sprintf("error: week %d not found in curriculum", currentWeek)
+		}
+		// extract the target-language terms from the vocab list
+		var vocabTerms []string
+		for _, v := range cw.Vocab {
+			vocabTerms = append(vocabTerms, v.Term)
+		}
+		progress := getWeekProgress(t.db, lang, vocabTerms)
+		if progress.LearnedTerms == 0 {
+			fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Week %d: %d terms to review", currentWeek, progress.TotalTerms)))
+		} else {
+			fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Week %d: %d/%d terms mastered", currentWeek, progress.LearnedTerms, progress.TotalTerms)))
+		}
+		result, _ := json.Marshal(progress)
+		return string(result)
 	case "append_general_note":
 		var args AppendNoteArgs
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
@@ -407,12 +480,12 @@ func (t *Tutor) executeTool(toolCall ToolCall) string {
 			log.Printf("append_curriculum_note: bad arguments: %v", err)
 			return "error: could not parse arguments"
 		}
-		currentWeek := getCurrentWeek(t.db)
+		currentWeek := getCurrentWeek(t.db, lang)
 		if currentWeek == 0 {
 			return "error: no curriculum week is in progress"
 		}
 		fmt.Println(toolStyle.Render(fmt.Sprintf("⟳ Week %d note: \"%s\"", currentWeek, args.Note)))
-		if err := appendCurriculumNote(currentWeek, args.Note); err != nil {
+		if err := appendCurriculumNote(lang, currentWeek, args.Note); err != nil {
 			log.Printf("append_curriculum_note: file error: %v", err)
 			return "error: failed to save curriculum note"
 		}

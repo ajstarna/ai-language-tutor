@@ -16,21 +16,25 @@ import (
 const schema = `
 CREATE TABLE IF NOT EXISTS words (
     id               INTEGER PRIMARY KEY,
-    term             TEXT NOT NULL UNIQUE,
+    language         TEXT NOT NULL DEFAULT '',
+    term             TEXT NOT NULL,
     context          TEXT NOT NULL,
     source           TEXT NOT NULL DEFAULT 'mistake',
     created_at       DATETIME NOT NULL,
     next_review_date DATETIME NOT NULL,
     interval         INTEGER NOT NULL DEFAULT 1,
     times_seen       INTEGER NOT NULL DEFAULT 0,
-    times_correct    INTEGER NOT NULL DEFAULT 0
+    times_correct    INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(language, term)
 );
 
 CREATE TABLE IF NOT EXISTS curriculum_progress (
-    week         INTEGER PRIMARY KEY,
+    language     TEXT NOT NULL DEFAULT '',
+    week         INTEGER NOT NULL,
     status       TEXT NOT NULL DEFAULT 'in_progress',
     started_at   DATETIME NOT NULL,
-    completed_at DATETIME
+    completed_at DATETIME,
+    PRIMARY KEY (language, week)
 );`
 
 // migrate old problem_words table to new words table if needed
@@ -39,6 +43,7 @@ INSERT OR IGNORE INTO words (id, term, context, source, created_at, next_review_
 SELECT id, term, problem_sentence, 'mistake', created_at, next_review_date, interval, times_seen, times_correct
 FROM problem_words;
 DROP TABLE IF EXISTS problem_words;`
+
 
 func openDB() *sql.DB {
 	homeDir, err := os.UserHomeDir()
@@ -56,7 +61,7 @@ func openDB() *sql.DB {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
-	// migrate old table if it exists
+	// migrate old problem_words table if it exists
 	var oldTable string
 	err = db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='problem_words'`).Scan(&oldTable)
 	if err == nil {
@@ -68,25 +73,32 @@ func openDB() *sql.DB {
 	return db
 }
 
-func storeTerm(db *sql.DB, term, context, source string) error {
+func storeMistake(db *sql.DB, lang, term, problemSentence string) error {
 	now := time.Now()
-	nextReview := now // immediately available for review
+	nextReview := now
 
-	// upsert: if term already exists, append the new context (separated by newline) and reset review schedule
+	// upsert: append the new context and reset review schedule (they got it wrong again)
 	_, err := db.Exec(`
-		INSERT INTO words (term, context, source, created_at, next_review_date)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(term) DO UPDATE SET
+		INSERT INTO words (language, term, context, source, created_at, next_review_date)
+		VALUES (?, ?, ?, 'mistake', ?, ?)
+		ON CONFLICT(language, term) DO UPDATE SET
 			context = context || char(10) || excluded.context,
 			next_review_date = excluded.next_review_date,
 			interval = 1
-	`, term, context, source, now, nextReview)
+	`, lang, term, problemSentence, now, nextReview)
 	return err
 }
 
-func storeTaughtTerms(db *sql.DB, words []TaughtTerm) error {
+func storeTaughtTerms(db *sql.DB, lang string, words []TaughtTerm) error {
+	now := time.Now()
 	for _, w := range words {
-		if err := storeTerm(db, w.Term, w.Definition, "taught"); err != nil {
+		// insert only if not already tracked — don't reset progress on existing terms
+		_, err := db.Exec(`
+			INSERT INTO words (language, term, context, source, created_at, next_review_date)
+			VALUES (?, ?, ?, 'taught', ?, ?)
+			ON CONFLICT(language, term) DO NOTHING
+		`, lang, w.Term, w.Definition, now, now)
+		if err != nil {
 			return err
 		}
 	}
@@ -99,13 +111,13 @@ type DueTerm struct {
 	Source  string `json:"source"`
 }
 
-func getDueTerms(db *sql.DB) ([]DueTerm, error) {
+func getDueTerms(db *sql.DB, lang string) ([]DueTerm, error) {
 	rows, err := db.Query(`
 		SELECT term, context, source FROM words
-		WHERE next_review_date <= ?
+		WHERE language = ? AND next_review_date <= ?
 		ORDER BY next_review_date ASC
 		LIMIT 5
-	`, time.Now())
+	`, lang, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -122,14 +134,30 @@ func getDueTerms(db *sql.DB) ([]DueTerm, error) {
 	return terms, nil
 }
 
-func recordResult(db *sql.DB, term string, passed bool) error {
-	// Read current interval first, then compute the new one in Go
-	// to avoid SQL evaluation order issues between interval and next_review_date.
+func recordResult(db *sql.DB, lang, term string, passed bool) error {
+	// Check if the term already exists (case-insensitive).
 	var currentInterval int
-	if err := db.QueryRow(`SELECT interval FROM words WHERE term = ?`, term).Scan(&currentInterval); err != nil {
+	var dbTerm string
+	err := db.QueryRow(`SELECT term, interval FROM words WHERE language = ? AND term = ? COLLATE NOCASE`, lang, term).Scan(&dbTerm, &currentInterval)
+
+	if err == sql.ErrNoRows {
+		// Term not in DB yet — create it from the quiz result.
+		newInterval := 1
+		if passed {
+			newInterval = 2
+		}
+		_, err := db.Exec(`
+			INSERT INTO words (language, term, context, source, created_at, next_review_date, interval, times_seen, times_correct)
+			VALUES (?, ?, 'quizzed', 'taught', datetime('now'), datetime('now', '+' || ? || ' days'), ?, 1, ?)
+		`, lang, term, newInterval, newInterval, boolToInt(passed))
+		return err
+	}
+	if err != nil {
 		return err
 	}
 
+	// Term exists — update it normally.
+	term = dbTerm // use the exact DB spelling
 	var newInterval int
 	var correctInc int
 	if passed {
@@ -140,25 +168,32 @@ func recordResult(db *sql.DB, term string, passed bool) error {
 		correctInc = 0
 	}
 
-	_, err := db.Exec(`
+	_, err = db.Exec(`
 		UPDATE words SET
 			times_seen = times_seen + 1,
 			times_correct = times_correct + ?,
 			interval = ?,
 			next_review_date = datetime('now', '+' || ? || ' days')
-		WHERE term = ?
-	`, correctInc, newInterval, newInterval, term)
+		WHERE language = ? AND term = ?
+	`, correctInc, newInterval, newInterval, lang, term)
 	return err
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // getCurrentWeek returns the current in-progress week, or 0 if none started.
-func getCurrentWeek(db *sql.DB) int {
+func getCurrentWeek(db *sql.DB, lang string) int {
 	var week int
 	err := db.QueryRow(`
 		SELECT week FROM curriculum_progress
-		WHERE status = 'in_progress'
+		WHERE language = ? AND status = 'in_progress'
 		ORDER BY week DESC LIMIT 1
-	`).Scan(&week)
+	`, lang).Scan(&week)
 	if err != nil {
 		return 0
 	}
@@ -166,22 +201,22 @@ func getCurrentWeek(db *sql.DB) int {
 }
 
 // startWeek marks a week as in-progress.
-func startWeek(db *sql.DB, week int) error {
+func startWeek(db *sql.DB, lang string, week int) error {
 	_, err := db.Exec(`
-		INSERT INTO curriculum_progress (week, status, started_at)
-		VALUES (?, 'in_progress', datetime('now'))
-		ON CONFLICT(week) DO NOTHING
-	`, week)
+		INSERT INTO curriculum_progress (language, week, status, started_at)
+		VALUES (?, ?, 'in_progress', datetime('now'))
+		ON CONFLICT(language, week) DO NOTHING
+	`, lang, week)
 	return err
 }
 
 // completeWeek marks the current week as completed and starts the next one.
-func completeWeek(db *sql.DB, week int) error {
+func completeWeek(db *sql.DB, lang string, week int) error {
 	_, err := db.Exec(`
 		UPDATE curriculum_progress
 		SET status = 'completed', completed_at = datetime('now')
-		WHERE week = ?
-	`, week)
+		WHERE language = ? AND week = ?
+	`, lang, week)
 	return err
 }
 
@@ -225,8 +260,8 @@ func appendGeneralNote(note string) error {
 	return err
 }
 
-func loadCurriculumNote(week int) string {
-	path := filepath.Join(notesDir(), "curriculum", fmt.Sprintf("week_%d.txt", week))
+func loadCurriculumNote(lang string, week int) string {
+	path := filepath.Join(notesDir(), "curriculum", lang, fmt.Sprintf("week_%d.txt", week))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -234,8 +269,8 @@ func loadCurriculumNote(week int) string {
 	return strings.TrimSpace(string(data))
 }
 
-func appendCurriculumNote(week int, note string) error {
-	dir := filepath.Join(notesDir(), "curriculum")
+func appendCurriculumNote(lang string, week int, note string) error {
+	dir := filepath.Join(notesDir(), "curriculum", lang)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -247,6 +282,29 @@ func appendCurriculumNote(week int, note string) error {
 	defer f.Close()
 	_, err = f.WriteString(note + "\n")
 	return err
+}
+
+type WeekProgress struct {
+	TotalTerms   int `json:"total_terms"`
+	StoredTerms  int `json:"stored_terms"`
+	LearnedTerms int `json:"learned_terms"` // interval >= 4 (passed at least twice)
+}
+
+// getWeekProgress checks how many of the given vocab terms are in the DB and how many are "learned".
+func getWeekProgress(db *sql.DB, lang string, vocabTerms []string) WeekProgress {
+	progress := WeekProgress{TotalTerms: len(vocabTerms)}
+	for _, term := range vocabTerms {
+		var interval int
+		err := db.QueryRow(`SELECT interval FROM words WHERE language = ? AND term = ?`, lang, term).Scan(&interval)
+		if err != nil {
+			continue // not in DB yet
+		}
+		progress.StoredTerms++
+		if interval >= 4 {
+			progress.LearnedTerms++
+		}
+	}
+	return progress
 }
 
 func profilePath() string {
